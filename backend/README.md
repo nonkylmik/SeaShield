@@ -1,6 +1,6 @@
-# SeaShield Backend
+# SeaShield V1.7 Backend
 
-Simulation-only FastAPI backend for SeaShield V1. It does not connect to real vessels, cameras, networks, or security infrastructure.
+Simulation-only FastAPI backend for SeaShield. Security events persist through SQLAlchemy in PostgreSQL, with SQLite as a local fallback. It does not connect to real vessels, cameras, networks, or security infrastructure.
 
 ## Run
 
@@ -8,6 +8,7 @@ From the `backend` directory:
 
 ```powershell
 ..\.venv\Scripts\python.exe -m pip install -r requirements.txt
+..\.venv\Scripts\python.exe -m alembic upgrade head
 ..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 # SeaShield V1.5 Backend
@@ -74,4 +75,4 @@ API docs are available at `http://localhost:8000/docs`.
 - `POST /api/v1/simulation/next`
 - `POST /api/v1/simulation/pause`, `/resume`, `/stop`, `/reset`
 
-The in-memory store is deliberately replaceable with repository/database adapters in a later version.
+`GET /api/security-events` supports `limit`, `offset`, `severity`, `event_type`, `status`, `scenario`, `vessel_id`, `start`, and `end` filters. The V1.6 `/events` route remains available and reads the same persistent history. Set `DATABASE_URL` in the root `.env`; without it, the backend uses `backend/seashield.db`.

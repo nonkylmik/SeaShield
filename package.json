@@ -4,6 +4,6 @@
   "private": true,
   "type": "module",
   "description": "SeaShield maritime security operations prototype",
-  "scripts": { "dev": "vite", "build": "vite build", "test": "node --test tests" },
+  "scripts": { "dev": "vite", "build": "vite build", "test": "node --test tests/*.test.mjs" },
   "dependencies": { "@vitejs/plugin-react": "latest", "lucide-react": "latest", "react": "latest", "react-dom": "latest", "react-router-dom": "latest", "tailwindcss": "latest", "vite": "latest", "typescript": "latest" }
 }
