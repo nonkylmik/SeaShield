@@ -4,27 +4,38 @@ SeaShield is a desktop-style maritime security operations prototype. It is inten
 
 ## Run locally
 
-From the workspace root:
+Install the frontend dependencies from the workspace root:
 
 ```powershell
-python -m http.server 4173 --directory SeaShield
+npm install
 ```
 
-Open `http://localhost:4173` in a browser. The page can also be opened directly from `SeaShield/index.html`.
+Terminal 1, start FastAPI from the workspace root:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir backend --reload --port 8000
+```
+
+Terminal 2, start the Vite cockpit:
+
+```powershell
+npm run dev
+```
+
+Open `http://localhost:5173`. The frontend uses `VITE_API_URL` with a development fallback of `http://localhost:8000`; set `$env:VITE_API_URL` before `npm run dev` to point at another API. Set `$env:VITE_POLL_INTERVAL_MS` to change the refresh interval (default: 2000 ms).
 
 ## Prototype surface
 
 - Persistent operations sidebar and operator top bar
 - Fleet security posture, vessel status, availability, events, and shift summary
 - Camera, cybersecurity, incident, sensor, access control, reports, fleet, vessel, and settings workspaces
-- Local simulation controls for camera failure, unauthorized access, unknown devices, brute-force login, suspicious traffic, GPS anomaly, sensor failure, firewall blocks, and fire alarms
-- Basic rule-driven correlation behavior represented in the local event stream
-- Demo Scenario controls with start, pause, resume, stop, reset, incident lifecycle, score recovery, notifications, global timeline filters, and search
+- FastAPI-backed vessel, camera, event, incident, score, health, and simulation state
+- Demo Scenario controls with start, pause, resume, stop, reset, incident lifecycle, notifications, polling, and global timeline filters
 
 ## Architecture
 
-The browser entrypoint is `src/entry.js`. Shared state lives in `src/services/appStore.js`, mock-backed access is exposed by `src/services/services.js`, and simulation behavior is isolated under `src/simulation/`. Security scoring is kept in `src/utils/securityScore.js`.
+The browser entrypoint is `src/entry.js`. `src/services/api/client.js` is the centralized HTTP client, `src/services/appStore.js` owns hydrated/polled presentation state, and `src/simulation/simulationEngine.js` forwards controls to FastAPI. Python remains the source of truth for events, incidents, scores, and scenario state.
 
 Focused core tests live in `tests/simulation.test.mjs` and cover score bounds/recovery and correlation behavior.
 
-`package.json` records the planned Vite/React/Tailwind migration path for the future desktop wrapper. Node/npm were not available in the current workstation, so V1 is delivered as a browser-launchable static prototype with the same service-boundary intent.
+The frontend is a Vite JavaScript cockpit with TypeScript API contracts in `src/services/api/types.d.ts`. Sensors and access-control records remain empty because V1.5 exposes no corresponding backend endpoints; they are reserved for a later API contract.

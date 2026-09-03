@@ -9,8 +9,8 @@ class ScenarioRequest(BaseModel):
     scenario: str
 
 
-app = FastAPI(title="SeaShield Security API", version="1.5.0", description="Simulation-only maritime security backend.")
-app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:4173", "http://localhost:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(title="SeaShield Security API", version="1.6.0", description="Simulation-only maritime security backend.")
+app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:4173", "http://localhost:5173", "http://127.0.0.1:4173", "http://127.0.0.1:5173"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 engine = SimulationEngine(seed=7)
 
 
@@ -103,30 +103,35 @@ def next_simulation_step():
 
 
 @app.post("/simulation/pause")
+@app.post("/api/v1/simulation/pause")
 def simulation_pause():
     engine.pause()
     return simulation_status()
 
 
 @app.post("/simulation/resume")
+@app.post("/api/v1/simulation/resume")
 def simulation_resume():
     engine.resume()
     return simulation_status()
 
 
 @app.post("/simulation/stop")
+@app.post("/api/v1/simulation/stop")
 def simulation_stop():
     engine.stop()
     return simulation_status()
 
 
 @app.post("/simulation/reset")
+@app.post("/api/v1/simulation/reset")
 def simulation_reset():
     engine.reset()
     return simulation_status()
 
 
 @app.post("/simulation/scenario/{scenario_name}/start")
+@app.post("/api/v1/simulation/scenario/{scenario_name}/start")
 def scenario_start(scenario_name: str):
     return start_simulation(ScenarioRequest(scenario=scenario_name))
 
