@@ -11,10 +11,16 @@ const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': 
 const vesselName = id => vesselService.getById(id)?.name || 'Unknown vessel';
 const severityClass = value => ['CRITICAL', 'HIGH'].includes(value) ? 'red' : ['MEDIUM', 'WARNING'].includes(value) ? 'amber' : '';
 
+function loginView() {
+  return `<main class="auth-shell"><form class="auth-panel" id="login-form"><div class="brand"><div class="brand-mark">S</div><div><strong>SEASHIELD</strong><small>MARITIME SECURITY OS</small></div></div><div class="eyebrow">SECURE OPERATOR ACCESS</div><h1>Sign in to SeaShield</h1><p>Authenticate to open the maritime security cockpit.</p><label>Email<input id="login-email" type="email" autocomplete="username" required /></label><label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>${store.authError ? `<div class="auth-error">${escape(store.authError)}</div>` : ''}<button class="trigger" type="submit">Sign in</button></form></main>`;
+}
+
 function layout(content) {
   const unread = store.notifications.filter(note => !note.read).length;
   document.querySelector('#app').innerHTML = `<div class="app"><aside class="sidebar"><div class="brand"><div class="brand-mark">S</div><div><strong>SEASHIELD</strong><small>MARITIME SECURITY OS</small></div></div><div class="nav-label">OPERATIONS</div><nav class="nav">${navigation.map(label => `<button class="${store.active === label ? 'active' : ''}" data-nav="${label}"><span class="nav-icon">◈</span><span>${label}</span></button>`).join('')}</nav><div class="sidebar-bottom"><div class="edge"><i class="dot"></i> EDGE SIMULATOR <span style="margin-left:auto;color:#5b7a83">V1.0.4</span></div><div class="sidebar-footer">Last sync ${new Date().toISOString().slice(11, 19)} UTC<br/>Simulation mode enabled</div></div></aside><main class="main"><header class="topbar"><div class="top-title">OPERATIONS CENTER <span>/ ${store.active.toUpperCase()}</span></div><select class="selector" id="vessel-select"><option value="all">All vessels</option>${store.vessels.map(vessel => `<option value="${vessel.id}" ${store.selectedVessel === vessel.id ? 'selected' : ''}>${vessel.name}</option>`).join('')}</select><input class="search" id="search" placeholder="Search events, vessels..." /><button class="top-action" id="notify">♧<b class="badge">${unread}</b></button><div class="user"><div class="avatar">JD</div><div>J. Dawson<small>SECURITY OPERATOR</small></div></div></header><section class="content">${content}</section></main></div>`;
   document.querySelector('.edge span').textContent = 'V1.7';
+  const user = document.querySelector('.user');
+  if (user) { const logout = document.createElement('button'); logout.className = 'logout'; logout.id = 'logout'; logout.type = 'button'; logout.textContent = 'Logout'; user.append(logout); }
   bind();
 }
 
@@ -41,6 +47,8 @@ function moduleView() {
   return heading(store.active, `Operational ${store.active.toLowerCase()} data from shared simulation state.`) + `<div class="section-label">${store.active.toUpperCase()} TELEMETRY</div><div class="module-grid">${data.map(row => `<section class="panel module-card"><div class="panel-header"><h2>${escape(row[0])}</h2><span class="tag ${severityClass(row[1])}">${escape(row[1])}</span></div><p>${escape(row[2])}</p><div class="module-bar"><i style="width:${String(row[1]).includes('OFFLINE') ? 30 : 94}%"></i></div>${store.active === 'Incidents' ? `<select class="incident-status" data-incident="${row[0]}">${['NEW', 'INVESTIGATING', 'CONTAINED', 'RESOLVED', 'FALSE POSITIVE'].map(status => `<option ${row[1] === status ? 'selected' : ''}>${status}</option>`).join('')}</select>` : ''}</section>`).join('')}</div><div class="sim-note"><b>Prototype boundary</b><br/>All values are fictional simulation output. Real vessel, CCTV, network, and FastAPI connections are reserved for a future version.</div>`;
 }
 function render() {
+  if (store.authLoading) return document.querySelector('#app').innerHTML = '<div class="empty-state">Checking operator session...</div>';
+  if (!store.authenticated) return document.querySelector('#app').innerHTML = loginView(), bind();
   const scrollContainer = document.querySelector('.content');
   const scrollTop = scrollContainer?.scrollTop || 0;
   const scrollLeft = scrollContainer?.scrollLeft || 0;
@@ -51,6 +59,8 @@ function render() {
   restoreScroll();
 }
 function bind() {
+  document.querySelector('#logout')?.addEventListener('click', async () => { try { await store.logout(); } catch (error) { alert(`Logout error: ${error.message}`); } });
+  document.querySelector('#login-form')?.addEventListener('submit', async event => { event.preventDefault(); const form = event.currentTarget; try { await store.login(form.querySelector('#login-email').value, form.querySelector('#login-password').value); } catch { render(); } });
   document.querySelectorAll('[data-nav]').forEach(button => button.addEventListener('click', () => { store.active = button.dataset.nav; render(); }));
   document.querySelector('#vessel-select')?.addEventListener('change', event => { store.selectedVessel = event.target.value; render(); });
   document.querySelector('#search')?.addEventListener('input', event => { searchTerm = event.target.value; if (store.active === 'Dashboard') render(); });
@@ -62,5 +72,4 @@ function bind() {
 }
 store.subscribe(render);
 render();
-store.refresh({ initial: true });
-store.startPolling();
+store.initializeAuth();

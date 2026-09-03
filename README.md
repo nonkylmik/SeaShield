@@ -8,6 +8,8 @@ SeaShield is a desktop-style maritime security operations prototype. It is inten
 
 V1.7 persists security events in PostgreSQL through SQLAlchemy. Copy `.env.example` to `.env` and set `DATABASE_URL`; `.env` is ignored by Git. For local development without PostgreSQL, omit `DATABASE_URL` and the backend uses `backend/seashield.db` (SQLite) with the same ORM and migrations.
 
+The cockpit includes prototype operator login/logout. The development account defaults to `operator@seashield.local` / `seashield-demo`; override these values and `SESSION_SECRET` in `.env`. Sessions use an HTTP-only cookie. This is development authentication, not production identity management.
+
 Create the PostgreSQL database once:
 
 ```powershell
