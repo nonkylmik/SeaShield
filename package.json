@@ -1,0 +1,9 @@
+{
+  "name": "seashield-desktop-prototype",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SeaShield maritime security operations prototype",
+  "scripts": { "dev": "vite", "build": "vite build", "test": "node --test tests" },
+  "dependencies": { "@vitejs/plugin-react": "latest", "lucide-react": "latest", "react": "latest", "react-dom": "latest", "react-router-dom": "latest", "tailwindcss": "latest", "vite": "latest", "typescript": "latest" }
+}
