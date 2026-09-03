@@ -1,15 +1,17 @@
 from datetime import datetime
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from db.database import Base, SessionLocal, engine as db_engine, get_db
 from db.events import create_event, delete_event, from_record, get_event, list_events, load_events
+from auth import SESSION_COOKIE, SESSION_TTL_SECONDS, authenticate, create_session, read_session
 from models.events import SecurityEvent
 from models.incidents import IncidentUpdate
 from schemas.security_events import SecurityEventCreate, SecurityEventResponse
+from schemas.auth import LoginRequest, LoginResponse, UserResponse
 from simulation.simulation_engine import SimulationEngine
 
 class ScenarioRequest(BaseModel):
@@ -37,6 +39,28 @@ def initialize_database() -> None:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "online", "mode": "simulation", "version": "1.7.0"}
+
+
+@app.post("/api/auth/login", response_model=LoginResponse)
+def login(payload: LoginRequest, response: Response):
+    user = authenticate(payload.email, payload.password)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Invalid email or password")
+    response.set_cookie(SESSION_COOKIE, create_session(user), max_age=SESSION_TTL_SECONDS, httponly=True, samesite="lax", secure=False)
+    return {"message": "Login successful", "user": UserResponse(email=user.email, name=user.name, role=user.role)}
+
+
+@app.post("/api/auth/logout", status_code=204)
+def logout(response: Response):
+    response.delete_cookie(SESSION_COOKIE)
+
+
+@app.get("/api/auth/me", response_model=UserResponse)
+def current_user(session: str | None = Cookie(default=None, alias=SESSION_COOKIE)):
+    user = read_session(session)
+    if user is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return UserResponse(email=user.email, name=user.name, role=user.role)
 
 
 @app.get("/vessels")

@@ -15,6 +15,7 @@ async function request(path, options = {}) {
   try {
     const response = await fetch(`${API_URL}${path}`, {
       ...options,
+      credentials: 'include',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json', ...options.headers },
       signal: controller.signal
     });
@@ -36,6 +37,9 @@ const post = (path, body) => request(path, body === undefined ? { method: 'POST'
 export const apiClient = {
   baseUrl: API_URL,
   getHealth: () => request('/health'),
+  getCurrentUser: () => request('/api/auth/me'),
+  login: (email, password) => request('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  logout: () => request('/api/auth/logout', { method: 'POST' }),
   getVessels: () => request('/api/v1/vessels'),
   getEvents: () => request('/api/security-events'),
   getIncidents: () => request('/api/v1/incidents'),

@@ -76,3 +76,5 @@ API docs are available at `http://localhost:8000/docs`.
 - `POST /api/v1/simulation/pause`, `/resume`, `/stop`, `/reset`
 
 `GET /api/security-events` supports `limit`, `offset`, `severity`, `event_type`, `status`, `scenario`, `vessel_id`, `start`, and `end` filters. The V1.6 `/events` route remains available and reads the same persistent history. Set `DATABASE_URL` in the root `.env`; without it, the backend uses `backend/seashield.db`.
+
+Authentication endpoints are `POST /api/auth/login`, `POST /api/auth/logout`, and `GET /api/auth/me`. They use an HTTP-only signed development session cookie. Configure `SESSION_SECRET`, `DEMO_USER_EMAIL`, and `DEMO_USER_PASSWORD` in `.env`.

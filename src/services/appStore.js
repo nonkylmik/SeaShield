@@ -6,10 +6,13 @@ const mapCamera = camera => ({ ...camera, vesselId: camera.vessel_id, lastHeartb
 const mapEvent = event => ({ ...event, eventId: event.event_id, vesselId: event.vessel_id, eventType: event.event_type });
 const mapIncident = incident => ({ ...incident, incidentId: incident.incident_id, vesselId: incident.vessel_id, createdAt: incident.created_at, updatedAt: incident.updated_at, relatedEvents: incident.related_event_ids, affectedSystems: incident.affected_systems, assignedOperator: incident.assigned_operator, investigationNotes: incident.investigation_notes, recommendedAction: incident.recommended_action });
 export const store = {
-  active: 'Dashboard', selectedVessel: 'all', vessels: [], cameras: [], sensors: [], accessEvents: [], events: [], incidents: [], notifications: [], listeners: new Set(), scenario: { name: '', status: 'IDLE', index: 0 }, loading: true, error: '', backend: { status: 'offline', mode: 'unknown', version: '' }, pollTimer: null, refreshInFlight: false,
+  active: 'Dashboard', selectedVessel: 'all', vessels: [], cameras: [], sensors: [], accessEvents: [], events: [], incidents: [], notifications: [], listeners: new Set(), scenario: { name: '', status: 'IDLE', index: 0 }, loading: true, error: '', backend: { status: 'offline', mode: 'unknown', version: '' }, authLoading: true, authenticated: false, user: null, authError: '', pollTimer: null, refreshInFlight: false,
   subscribe(listener) { this.listeners.add(listener); return () => this.listeners.delete(listener); },
   notify() { this.listeners.forEach(listener => listener(this)); },
   vessel(id) { return this.vessels.find(item => item.id === id); },
+  async initializeAuth() { try { this.user = await apiClient.getCurrentUser(); this.authenticated = true; await this.refresh({ initial: true }); this.startPolling(); } catch { this.authenticated = false; this.loading = false; } finally { this.authLoading = false; this.notify(); } },
+  async login(email, password) { this.authError = ''; try { const result = await apiClient.login(email, password); this.user = result.user; this.authenticated = true; await this.refresh({ initial: true }); this.startPolling(); } catch (error) { this.authError = error.message; this.authenticated = false; throw error; } finally { this.authLoading = false; this.notify(); } },
+  async logout() { await apiClient.logout(); if (this.pollTimer) { clearInterval(this.pollTimer); this.pollTimer = null; } this.authenticated = false; this.user = null; this.vessels = []; this.events = []; this.incidents = []; this.notify(); },
   async refresh({ initial = false } = {}) {
     if (this.refreshInFlight) return;
     this.refreshInFlight = true;
