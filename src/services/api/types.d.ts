@@ -18,6 +18,7 @@ export interface Camera {
 }
 
 export interface SecurityEvent {
+  id?: number;
   event_id: string;
   timestamp: string;
   vessel_id: string;
@@ -25,8 +26,13 @@ export interface SecurityEvent {
   category: 'PHYSICAL' | 'CYBER' | 'VESSEL_SYSTEM' | 'ENVIRONMENTAL';
   severity: 'INFO' | 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   source: string;
+  title: string | null;
   description: string;
   status: 'OPEN' | 'RESOLVED';
+  confidence: number | null;
+  scenario: string | null;
+  metadata: Record<string, unknown>;
+  created_at?: string;
 }
 
 export interface Incident {

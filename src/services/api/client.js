@@ -37,7 +37,7 @@ export const apiClient = {
   baseUrl: API_URL,
   getHealth: () => request('/health'),
   getVessels: () => request('/api/v1/vessels'),
-  getEvents: () => request('/api/v1/events'),
+  getEvents: () => request('/api/security-events'),
   getIncidents: () => request('/api/v1/incidents'),
   getCameras: () => request('/api/v1/cameras'),
   getSecurity: vesselId => request(`/security/${encodeURIComponent(vesselId)}`),

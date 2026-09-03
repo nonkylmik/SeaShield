@@ -35,6 +35,9 @@ class SecurityEvent(BaseModel):
     source: str
     description: str
     status: EventStatus = EventStatus.OPEN
+    title: str | None = None
+    confidence: float | None = Field(default=None, ge=0, le=1)
+    scenario: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
