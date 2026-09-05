@@ -69,6 +69,63 @@ cd backend
 
 The browser entrypoint is `src/entry.js`. `src/services/api/client.js` is the centralized HTTP client, `src/services/appStore.js` owns hydrated/polled presentation state, and `src/simulation/simulationEngine.js` forwards controls to FastAPI. Python remains the source of truth for events, incidents, scores, and scenario state.
 
+### REST + WebSocket architecture
+
+SeaShield now follows a hybrid model:
+
+- REST handles initial state and historical queries
+- WebSocket handles live security events, incidents, score changes, and simulation status updates
+- a central in-memory manager on the backend keeps connections alive and broadcasts without per-component wiring
+
+```text
+React / TypeScript
+    │ REST
+    ▼
+FastAPI
+    │
+    ├── GET /vessels
+    ├── GET /events
+    ├── GET /incidents
+    ├── GET /security/{vessel_id}
+    └── /simulation/* controls
+    │
+    │ WebSocket
+    ▼
+/ws/security
+    ▲
+    │
+SimulationEngine
+    ├── Security events
+    ├── Correlations
+    ├── Incidents
+    └── Security scores
+```
+
+### WebSocket message contract
+
+The live channel uses a single payload structure:
+
+```json
+{
+  "type": "security_event",
+  "timestamp": "2026-09-05T12:00:00Z",
+  "data": {
+    "event": { "event_id": "...", "vessel_id": "calypso" }
+  }
+}
+```
+
+Supported message types:
+
+- `security_event`
+- `incident_created`
+- `security_score_changed`
+- `vessel_status_changed`
+- `simulation_status`
+- `notification`
+
+Frontend consumers are centralized in `src/services/appStore.js` and `src/services/websocket.js` to avoid duplicate event listeners across components.
+
 Focused core tests live in `tests/simulation.test.mjs` and cover score bounds/recovery and correlation behavior.
 
 The frontend is a Vite JavaScript cockpit with TypeScript API contracts in `src/services/api/types.d.ts`. Sensors and access-control records remain empty because V1.5 exposes no corresponding backend endpoints; they are reserved for a later API contract. PostgreSQL is the intended V1.7 deployment database; SQLite is only a local fallback when PostgreSQL is unavailable.

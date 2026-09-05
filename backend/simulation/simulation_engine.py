@@ -1,5 +1,8 @@
+import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 from models.events import Camera, SecurityEvent, Vessel
 from security_engine.event_correlation import CorrelationResult, correlate
@@ -25,6 +28,20 @@ class SimulationEngine:
         self.vessels = self._default_vessels()
         self.cameras = [Camera(id="cam-17", vessel_id="calypso", location="Cargo Area")]
         self.events: list[SecurityEvent] = []
+        self._broadcast: Callable[[dict[str, Any]], Any] | None = None
+
+    def set_broadcaster(self, broadcaster: Callable[[dict[str, Any]], Any] | None) -> None:
+        self._broadcast = broadcaster
+
+    def _emit(self, message_type: str, data: dict[str, Any]) -> None:
+        if self._broadcast is None:
+            return
+        payload = {"type": message_type, "timestamp": datetime.now(timezone.utc).isoformat(), "data": data}
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._broadcast(payload))
 
     def start(self, scenario_name: str) -> None:
         self.scenarios.start(scenario_name)
@@ -36,6 +53,7 @@ class SimulationEngine:
             return None
         event = SecurityEvent(event_id=self.generator.create(scenario.vessel_id, step.event_type).event_id, timestamp=datetime.now(timezone.utc), vessel_id=scenario.vessel_id, event_type=step.event_type, category=step.category, severity=step.severity, source=step.source, description=step.description)
         self.events.insert(0, event)
+        self._emit("security_event", {"event": event.model_dump(mode="json")})
         if event.event_type == "CAMERA_OFFLINE":
             for camera in self.cameras:
                 if camera.vessel_id == event.vessel_id:
@@ -43,7 +61,8 @@ class SimulationEngine:
                     camera.recording = False
         result = correlate(self.events, event.vessel_id)
         if result:
-            self.incidents.create_from_correlation(result)
+            incident = self.incidents.create_from_correlation(result)
+            self._emit("incident_created", {"incident": incident.model_dump(mode="json")})
         self.recalculate()
         return TickResult(event, result)
 
@@ -69,8 +88,14 @@ class SimulationEngine:
 
     def recalculate(self) -> None:
         for vessel in self.vessels:
+            previous_score = vessel.score
+            previous_status = vessel.status
             vessel.score = calculate_score(vessel, self.events, self.incidents.get_all())
             vessel.status = status_for_score(vessel.score)
+            if previous_score != vessel.score:
+                self._emit("security_score_changed", {"vessel_id": vessel.id, "score": vessel.score, "status": vessel.status})
+            if previous_status != vessel.status:
+                self._emit("vessel_status_changed", {"vessel_id": vessel.id, "status": vessel.status})
 
     @staticmethod
     def _default_vessels() -> list[Vessel]:
