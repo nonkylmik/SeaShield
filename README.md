@@ -2,130 +2,106 @@
 
 SeaShield is a desktop-style maritime security operations prototype. It is intentionally simulation-only: no vessel, camera, network, or security infrastructure is connected.
 
-## Run locally
+## Database architecture
 
-### SeaShield V1.7 - PostgreSQL
+SeaShield V1.7 introduces a persistent data layer underneath the existing V1.8 WebSocket and REST architecture. FastAPI remains the API boundary, the simulation/security engine remains responsible for logic, and PostgreSQL becomes the durable source of truth for vessel state, events, incidents, and score history. SQLite is kept as a safe local fallback for development and for migration verification.
 
-V1.7 persists security events in PostgreSQL through SQLAlchemy. Copy `.env.example` to `.env` and set `DATABASE_URL`; `.env` is ignored by Git. For local development without PostgreSQL, omit `DATABASE_URL` and the backend uses `backend/seashield.db` (SQLite) with the same ORM and migrations.
+### Core tables
 
-The cockpit includes prototype operator login/logout. The development account defaults to `operator@seashield.local` / `seashield-demo`; override these values and `SESSION_SECRET` in `.env`. Sessions use an HTTP-only cookie. This is development authentication, not production identity management.
+- `security_events`: persisted security event records, event metadata, scenario data, and timestamps
+- `vessels`: vessel identity, base score, score, status, and communication timestamps
+- `incidents`: incident definitions, severity, status, and investigation notes
+- `incident_event_links`: many-to-many relation between incidents and their related event IDs
+- `security_score_history`: score transitions over time for trend reconstruction
+- `simulation_runs`: scenario lifecycle metadata for historical context
 
-Create the PostgreSQL database once:
+## Setup
+
+1. Copy `.env.example` to `.env` and set `DATABASE_URL` to your local PostgreSQL connection.
+2. For local development without PostgreSQL, leave `DATABASE_URL` unset and the app will default to the SQLite file at `backend/seashield.db`.
+3. Install project dependencies:
+
+```powershell
+cd backend
+..\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+### PostgreSQL setup
 
 ```powershell
 createdb -U postgres seashield
 ```
 
-Install backend dependencies and apply migrations:
+Then set the value in `.env` such as:
+
+```env
+DATABASE_URL=postgresql+asyncpg://postgres:change_me@localhost:5432/seashield
+```
+
+## Running
+
+Start the backend:
 
 ```powershell
 cd backend
-..\.venv\Scripts\python.exe -m pip install -r requirements.txt
-..\.venv\Scripts\python.exe -m alembic upgrade head
-cd ..
+..\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
-Start FastAPI in Terminal 1:
-
-```powershell
-\.venv\Scripts\python.exe -m uvicorn app.main:app --app-dir backend --reload --port 8000
-```
-
-Install frontend dependencies and start Vite in Terminal 2:
+Start the frontend:
 
 ```powershell
 npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`. The frontend uses `VITE_API_URL` with a development fallback of `http://localhost:8000`; set `$env:VITE_API_URL` before `npm run dev` to point at another API. Set `$env:VITE_POLL_INTERVAL_MS` to change the refresh interval (default: 2000 ms).
+Open the UI at `http://localhost:5173`.
 
-Persistent event API:
+## Migrations
 
-- `GET /api/security-events?limit=50&offset=0&severity=CRITICAL`
-- `GET /api/security-events/{event_id}`
-- `POST /api/security-events`
-- `DELETE /api/security-events/{event_id}`
-
-Simulation events are written to `security_events` as they are generated. The frontend reads this history through the same polling client, so events remain available after frontend or backend restarts. `POST /api/v1/simulation/reset` resets the active scenario but does not delete historical events.
-
-Run tests:
+Apply the schema after configuration:
 
 ```powershell
-npm test
 cd backend
-..\.venv\Scripts\python.exe -m pytest
+..\.venv\Scripts\python.exe -m alembic upgrade head
 ```
 
-## Prototype surface
+Create a new migration when the model changes:
 
-- Persistent operations sidebar and operator top bar
-- Fleet security posture, vessel status, availability, events, and shift summary
-- Camera, cybersecurity, incident, sensor, access control, reports, fleet, vessel, and settings workspaces
-- FastAPI-backed vessel, camera, event, incident, score, health, and simulation state
-- Demo Scenario controls with start, pause, resume, stop, reset, incident lifecycle, notifications, polling, and global timeline filters
-
-## Architecture
-
-The browser entrypoint is `src/entry.js`. `src/services/api/client.js` is the centralized HTTP client, `src/services/appStore.js` owns hydrated/polled presentation state, and `src/simulation/simulationEngine.js` forwards controls to FastAPI. Python remains the source of truth for events, incidents, scores, and scenario state.
-
-### REST + WebSocket architecture
-
-SeaShield now follows a hybrid model:
-
-- REST handles initial state and historical queries
-- WebSocket handles live security events, incidents, score changes, and simulation status updates
-- a central in-memory manager on the backend keeps connections alive and broadcasts without per-component wiring
-
-```text
-React / TypeScript
-    │ REST
-    ▼
-FastAPI
-    │
-    ├── GET /vessels
-    ├── GET /events
-    ├── GET /incidents
-    ├── GET /security/{vessel_id}
-    └── /simulation/* controls
-    │
-    │ WebSocket
-    ▼
-/ws/security
-    ▲
-    │
-SimulationEngine
-    ├── Security events
-    ├── Correlations
-    ├── Incidents
-    └── Security scores
+```powershell
+cd backend
+..\.venv\Scripts\python.exe -m alembic revision -m "describe change"
 ```
 
-### WebSocket message contract
+If you need to roll back a migration in a local development database, use the Alembic downgrade command: 
 
-The live channel uses a single payload structure:
-
-```json
-{
-  "type": "security_event",
-  "timestamp": "2026-09-05T12:00:00Z",
-  "data": {
-    "event": { "event_id": "...", "vessel_id": "calypso" }
-  }
-}
+```powershell
+cd backend
+..\.venv\Scripts\python.exe -m alembic downgrade -1
 ```
 
-Supported message types:
+## Seed data
 
-- `security_event`
-- `incident_created`
-- `security_score_changed`
-- `vessel_status_changed`
-- `simulation_status`
-- `notification`
+The project does not auto-populate demo records on startup. Use a local script or direct database session to insert a small set of development vessels if needed. Keep any seed scripts explicit and local-only.
 
-Frontend consumers are centralized in `src/services/appStore.js` and `src/services/websocket.js` to avoid duplicate event listeners across components.
+## Testing
 
-Focused core tests live in `tests/simulation.test.mjs` and cover score bounds/recovery and correlation behavior.
+Run the backend tests:
 
-The frontend is a Vite JavaScript cockpit with TypeScript API contracts in `src/services/api/types.d.ts`. Sensors and access-control records remain empty because V1.5 exposes no corresponding backend endpoints; they are reserved for a later API contract. PostgreSQL is the intended V1.7 deployment database; SQLite is only a local fallback when PostgreSQL is unavailable.
+```powershell
+cd backend
+..\.venv\Scripts\python.exe -m pytest -q
+```
+
+Run the frontend build:
+
+```powershell
+npm run build
+```
+
+## Architecture and compatibility
+
+The existing V1.8 WebSocket flow remains intact. FastAPI emits live updates to the WebSocket manager, while the persistence layer stores the accepted events and incident/score records before or alongside those broadcasts. This preserves real-time behavior without removing the historical data path.
+
+## Current status
+
+This repository currently verified the backend persistence flow and frontend build in the local workspace. A real PostgreSQL server must be running for a true production-style connection test; the default SQLite configuration is used as a safe fallback for local validation.

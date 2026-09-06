@@ -3,15 +3,21 @@ from datetime import datetime, timezone
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Response, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from auth import SESSION_COOKIE, SESSION_TTL_SECONDS, authenticate, create_session, read_session
 from db.database import Base, SessionLocal, engine as db_engine, get_db
 from db.events import create_event, delete_event, from_record, get_event, list_events, load_events
-from auth import SESSION_COOKIE, SESSION_TTL_SECONDS, authenticate, create_session, read_session
+from db.models import IncidentRecord, VesselRecord
+from db.repositories.event_repository import create_event_record, list_event_records
+from db.repositories.incident_repository import create_incident_record, get_incident_record, get_related_event_ids, list_incident_records
+from db.repositories.security_repository import append_security_score, list_security_score_history
+from db.repositories.vessel_repository import get_vessel_record, list_vessel_records, to_vessel_model, upsert_vessel_record
 from models.events import SecurityEvent
-from models.incidents import IncidentUpdate
-from schemas.security_events import SecurityEventCreate, SecurityEventResponse
+from models.incidents import Incident, IncidentStatus, IncidentUpdate
 from schemas.auth import LoginRequest, LoginResponse, UserResponse
+from schemas.security_events import SecurityEventCreate, SecurityEventResponse
 from simulation.simulation_engine import SimulationEngine
 from websocket_manager import ConnectionManager
 
@@ -31,6 +37,26 @@ def event_response(record):
     return SecurityEventResponse(id=record.id, created_at=record.created_at, **event.model_dump())
 
 
+def incident_response(record: IncidentRecord, related_event_ids: list[str] | None = None) -> dict:
+    related = related_event_ids if related_event_ids is not None else []
+    return {
+        "incident_id": record.incident_id,
+        "vessel_id": record.vessel_id,
+        "type": record.type,
+        "title": record.title,
+        "severity": record.severity,
+        "status": record.status,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+        "description": record.description,
+        "related_event_ids": related,
+        "affected_systems": [],
+        "assigned_operator": record.assigned_operator,
+        "investigation_notes": record.investigation_notes,
+        "recommended_action": record.recommended_action,
+    }
+
+
 async def broadcast_status_message(message_type: str, data: dict) -> None:
     await app.state.websocket_manager.broadcast({
         "type": message_type,
@@ -43,13 +69,20 @@ async def broadcast_status_message(message_type: str, data: dict) -> None:
 def initialize_database() -> None:
     Base.metadata.create_all(bind=db_engine)
     with SessionLocal() as db:
+        for vessel in engine.vessels:
+            upsert_vessel_record(db, vessel_id=vessel.id, name=vessel.name, imo=vessel.imo, base_score=vessel.base_score, score=vessel.score, status=vessel.status)
         engine.events = load_events(db)
         engine.recalculate()
 
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "online", "mode": "simulation", "version": "1.7.0"}
+    try:
+        with SessionLocal() as db:
+            db.execute(text("SELECT 1"))
+        return {"status": "ok", "database": "connected", "mode": "simulation", "version": "1.7.0"}
+    except Exception:
+        return {"status": "degraded", "database": "unavailable", "mode": "simulation", "version": "1.7.0"}
 
 
 @app.post("/api/auth/login", response_model=LoginResponse)
@@ -76,16 +109,22 @@ def current_user(session: str | None = Cookie(default=None, alias=SESSION_COOKIE
 
 @app.get("/vessels")
 @app.get("/api/v1/vessels")
-def get_vessels():
+def get_vessels(db: Session = Depends(get_db)):
+    records = list_vessel_records(db)
+    if records:
+        return [to_vessel_model(record) for record in records]
     return engine.vessels
 
 
 @app.get("/api/v1/vessels/{vessel_id}")
-def get_vessel(vessel_id: str):
-    vessel = next((item for item in engine.vessels if item.id == vessel_id), None)
-    if vessel is None:
-        raise HTTPException(status_code=404, detail="Vessel not found")
-    return vessel
+def get_vessel(vessel_id: str, db: Session = Depends(get_db)):
+    record = get_vessel_record(db, vessel_id)
+    if record is None:
+        vessel = next((item for item in engine.vessels if item.id == vessel_id), None)
+        if vessel is None:
+            raise HTTPException(status_code=404, detail="Vessel not found")
+        return vessel
+    return to_vessel_model(record)
 
 
 @app.get("/api/v1/cameras")
@@ -98,14 +137,46 @@ def get_cameras(vessel_id: str | None = None):
 @app.get("/events")
 @app.get("/api/v1/events")
 def get_events(vessel_id: str | None = None, db: Session = Depends(get_db)):
-    return [from_record(event) for event in list_events(db, limit=500, offset=0, vessel_id=vessel_id)]
+    records = list_event_records(db, limit=500, offset=0, vessel_id=vessel_id)
+    return [from_record(event) for event in records]
 
 
 def persist_tick(db: Session):
     result = engine.tick()
     if result is None:
         return None
-    create_event(db, result.event, engine.scenarios.name)
+    create_event_record(
+        db,
+        event_id=result.event.event_id,
+        timestamp=result.event.timestamp,
+        vessel_id=result.event.vessel_id,
+        event_type=result.event.event_type,
+        category=result.event.category.value,
+        severity=result.event.severity.value,
+        source=result.event.source,
+        description=result.event.description,
+        status=result.event.status.value,
+        title=result.event.title,
+        confidence=result.event.confidence,
+        scenario=engine.scenarios.name,
+        metadata=result.event.metadata,
+    )
+    for vessel in engine.vessels:
+        upsert_vessel_record(db, vessel_id=vessel.id, name=vessel.name, imo=vessel.imo, base_score=vessel.base_score, score=vessel.score, status=vessel.status)
+        append_security_score(db, vessel_id=vessel.id, score=vessel.score, previous_score=next((entry.score for entry in list_security_score_history(db, vessel_id=vessel.id)[:1]), None), reason="simulation_update")
+    if result.correlation:
+        incident = engine.incidents.create_from_correlation(result.correlation)
+        create_incident_record(
+            db,
+            incident_id=incident.incident_id,
+            vessel_id=incident.vessel_id,
+            type=incident.type,
+            title=incident.title,
+            severity=incident.severity.value,
+            description=incident.description,
+            status=incident.status.value,
+            related_event_ids=list(incident.related_event_ids),
+        )
     return result
 
 
@@ -137,25 +208,34 @@ def remove_security_event(event_id: str, db: Session = Depends(get_db)):
 
 @app.get("/incidents")
 @app.get("/api/v1/incidents")
-def get_incidents():
+def get_incidents(db: Session = Depends(get_db)):
+    records = list_incident_records(db)
+    if records:
+        return [incident_response(record, get_related_event_ids(db, record.incident_id)) for record in records]
     return engine.incidents.get_all()
 
 
 @app.get("/security/{vessel_id}")
-def get_security(vessel_id: str):
-    vessel = next((item for item in engine.vessels if item.id == vessel_id), None)
-    if vessel is None:
-        raise HTTPException(status_code=404, detail="Vessel not found")
-    return {"vessel_id": vessel.id, "score": vessel.score, "status": vessel.status}
+def get_security(vessel_id: str, db: Session = Depends(get_db)):
+    record = get_vessel_record(db, vessel_id)
+    if record is None:
+        vessel = next((item for item in engine.vessels if item.id == vessel_id), None)
+        if vessel is None:
+            raise HTTPException(status_code=404, detail="Vessel not found")
+        return {"vessel_id": vessel.id, "score": vessel.score, "status": vessel.status}
+    return {"vessel_id": record.vessel_id, "score": record.score, "status": record.status}
 
 
 @app.get("/incidents/{incident_id}")
 @app.get("/api/v1/incidents/{incident_id}")
-def get_incident(incident_id: str):
-    incident = engine.incidents.get(incident_id)
-    if incident is None:
-        raise HTTPException(status_code=404, detail="Incident not found")
-    return incident
+def get_incident(incident_id: str, db: Session = Depends(get_db)):
+    record = get_incident_record(db, incident_id)
+    if record is None:
+        incident = engine.incidents.get(incident_id)
+        if incident is None:
+            raise HTTPException(status_code=404, detail="Incident not found")
+        return incident
+    return incident_response(record, get_related_event_ids(db, record.incident_id))
 
 
 @app.patch("/incidents/{incident_id}")
